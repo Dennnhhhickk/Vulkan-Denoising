@@ -1,0 +1,4 @@
+../Images/Bird.bmp
+0
+Final.png
+4 4

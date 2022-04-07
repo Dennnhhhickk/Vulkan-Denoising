@@ -1,0 +1,94 @@
+#version 450
+#extension GL_ARB_separate_shader_objects : enable
+
+#define WORKGROUP_SIZE 16
+layout (local_size_x = WORKGROUP_SIZE, local_size_y = WORKGROUP_SIZE, local_size_z = 1 ) in;
+ 
+struct Pixel{
+    vec4 value;
+};
+ 
+layout(std140, binding = 0) buffer buf
+{
+    Pixel imageData[];
+};
+
+vec4 Color(uint x, uint y, int a_width)
+{
+    return imageData[a_width * y + x + 2].value;
+}
+
+float ddistance(vec4 a, vec4 b)
+{
+    vec4 c = 256.0 * (a - b);
+    return sqrt(dot(c, c));
+}
+
+float w(uint posx, uint posy, uint x, uint y, int a_width, int R, float DISPER)
+{
+    float res = 0;
+    #pragma unroll 1
+    for (int dy = -R; dy <= R; ++dy) {
+        for (int dx = -R; dx <= R; ++dx) {
+            res += ddistance(Color(posx + dx, posy + dy, a_width), Color(x + dx, y + dy, a_width));
+        }
+    }
+    return exp(-res / (DISPER * DISPER));
+}
+ 
+void main()
+{
+    int WIDTH = int(imageData[0].value.r);
+    int HEIGHT = int(imageData[0].value.g);
+    int R = int(imageData[0].value.b);
+    float DISPER = imageData[0].value.a;
+
+    int posy = int(imageData[1].value.r);
+    int posx = int(imageData[1].value.g);
+    int a_width = int(imageData[1].value.a);
+    int a_height = int(imageData[1].value.b);
+
+    uint x = int(gl_GlobalInvocationID.x); //int(gl_LocalInvocationID.x) * WIDTH + gl_WorkGroupID.x * WORKGROUP_SIZE * WIDTH;
+    uint y = int(gl_GlobalInvocationID.y); //int(gl_LocalInvocationID.y) * HEIGHT + gl_WorkGroupID.y * WORKGROUP_SIZE * HEIGHT;
+
+    if (x >= a_width || y >= a_height) {
+        return;
+    }
+
+    vec4 a1 = vec4(0.0);
+    float a2 = 0;
+    float ans;
+
+    for (int i = -HEIGHT; i < HEIGHT; ++i) {
+        if (0 <= y + i + posy * HEIGHT && y + i + posy * HEIGHT < a_height) {
+            for (int j = -WIDTH; j < WIDTH; ++j) {
+                if (0 <= x + j + posx * WIDTH && x + j + posx * WIDTH < a_width) {
+                    ans = w(x, y, x + j + posx * WIDTH, y + i + posy * HEIGHT, a_width, R, DISPER);
+                    a1 += Color(x + j + posx * WIDTH, y + i + posy * HEIGHT, a_width) * ans;
+                    a2 += ans;
+                }
+                if (0 <= x + j - posx * WIDTH && x + j - posx * WIDTH < a_width) {
+                    ans = w(x, y, x + j - posx * WIDTH, y + i + posy * HEIGHT, a_width, R, DISPER);
+                    a1 += Color(x + j - posx * WIDTH, y + i + posy * HEIGHT, a_width) * ans;
+                    a2 += ans;
+                }
+            }
+        }
+        if (0 <= y + i - posy * HEIGHT && y + i - posy * HEIGHT < a_height) {
+            for (int j = -WIDTH; j < WIDTH; ++j) {
+                if (0 <= x + j + posx * WIDTH && x + j + posx * WIDTH < a_width) {
+                    ans = w(x, y, x + j + posx * WIDTH, y + i - posy * HEIGHT, a_width, R, DISPER);
+                    a1 += Color(x + j + posx * WIDTH, y + i - posy * HEIGHT, a_width) * ans;
+                    a2 += ans;
+                }
+                if (0 <= x + j - posx * WIDTH && x + j - posx * WIDTH < a_width) {
+                    ans = w(x, y, x + j - posx * WIDTH, y + i - posy * HEIGHT, a_width, R, DISPER);
+                    a1 += Color(x + j - posx * WIDTH, y + i - posy * HEIGHT, a_width) * ans;
+                    a2 += ans;
+                }
+            }
+        }
+    }
+    imageData[a_width * y + x + 2 + 2 * a_width * a_height].value += a1;
+    imageData[a_width * y + x + 2 + a_width * a_height].value += vec4(a2, a2, a2, 1.0f);
+}
